@@ -45,13 +45,24 @@ docker compose down -v    # 连数据卷一起删，下次启动重新灌种子�
 - 页面：工位与设备（`/bays`）
 - 接口：`GET/POST /api/bays`、`PUT /api/bays/{id}/status`、`GET/POST /api/equipments`、`PUT /api/equipments/{id}`
 
-### 2. 维修工单闭环（`work_order`）
+### 2. 维修工单闭环（`work_order` / `qc_item`）
 
 一台车一次进厂开一张单，单号 `WO-xxxx` 自动生成。状态机：
-`待派工 → 施工中 → 待质检 → 已交车`；质检结论 `返工` 时退回 `施工中`；`待派工 / 施工中` 可以取消。
+`待派工 → 施工中 → 待质检 → 已交车`；质检有项不过时退回 `施工中`；`待派工 / 施工中` 可以取消。
 
-- 页面：维修工单（`/orders`）
-- 接口：`GET/POST /api/orders`、`PUT /api/orders/{id}/assign`、`POST /api/orders/{id}/advance?action=&qcResult=`
+**质检项表是交车的硬门槛**：每张送检工单固定三行 `qc_item`——制动、灯光、路试，逐项记「过 / 不过」：
+
+- 项表空着、缺项、某项没选结论，都不许交车（后端拦，前端弹窗也拦）；
+- 三项全过才从 `待质检` 走到 `已交车`；任意一项不过，工单退回 `施工中`，并在工单上记下是哪几项不过；
+- 项表落库和工单改状态在同一个数据库事务、同一把工单行锁里提交：网断在半路要么一起成要么一起不动，
+  不会出现已交车但项表没齐；同一张单被点两次「交车」只会成一次；
+- 返工后再次完工送检，仍是同样三行（上一轮结论清空重检），不会建重；
+- 旧的只选一个总评就交车的通道已删除，`advance?action=qc` 一律拒绝。
+
+- 页面：维修工单（`/orders`），待质检单点「质检交车」在弹窗里逐项记结论
+- 接口：`GET/POST /api/orders`、`PUT /api/orders/{id}/assign`、
+  `POST /api/orders/{id}/advance?action=finish|cancel`、
+  `GET /api/orders/{id}/qc-items`、`POST /api/orders/{id}/qc`（body：每项的过 / 不过 + 备注）
 
 ### 3. 派工与工位占用（`work_order.plan_date / start_min / end_min`）
 
@@ -78,9 +89,9 @@ backend/src/main/java/com/repair/workshop/
 ├── config/       CORS 配置
 ├── controller/   REST 入口
 ├── dto/          BizException + 统一错误响应
-├── entity/       6 张业务表
+├── entity/       7 张业务表（含质检项表 qc_item）
 ├── repository/   Spring Data JPA
-└── service/      业务规则（编号唯一、时段占用、状态机、库存与退料）
+└── service/      业务规则（编号唯一、时段占用、状态机、质检项表、库存与退料）
 backend/src/main/resources/schema.sql   建表 + 种子数据（挂进 MySQL initdb）
 frontend/src/views/                     4 个业务页面
 ```

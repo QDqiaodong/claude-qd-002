@@ -34,7 +34,9 @@ export const orderApi = {
   open: (data) => http.post('/orders', data),
   assign: (id, data) => http.put(`/orders/${id}/assign`, data),
   advance: (id, action, qcResult) =>
-    http.post(`/orders/${id}/advance`, null, { params: { action, qcResult } })
+    http.post(`/orders/${id}/advance`, null, { params: { action, qcResult } }),
+  qcItems: (id) => http.get(`/orders/${id}/qc-items`),
+  submitQc: (id, items) => http.post(`/orders/${id}/qc`, { items })
 }
 
 export const partApi = {

@@ -37,15 +37,28 @@
           <el-tag :type="tagType(row.status)">{{ row.status }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="qcResult" label="质检" width="80" />
+      <el-table-column label="质检" width="150">
+        <template #default="{ row }">
+          <el-tag v-if="row.qcResult === '合格'" type="success" size="small">合格</el-tag>
+          <template v-else-if="row.failedItems">
+            <el-tag type="danger" size="small">返工</el-tag>
+            <div style="color:#f56c6c;font-size:12px;line-height:1.4;margin-top:2px">
+              不过项：{{ row.failedItems }}
+            </div>
+          </template>
+          <span v-else style="color:#c0c4cc">—</span>
+        </template>
+      </el-table-column>
       <el-table-column label="操作" width="230">
         <template #default="{ row }">
           <el-button v-if="row.status === '待派工'" link type="primary" @click="openAssign(row)">派工</el-button>
           <el-button v-if="row.status === '施工中'" link type="primary" @click="advance(row, 'finish')">完工送检</el-button>
-          <template v-if="row.status === '待质检'">
-            <el-button link type="success" @click="advance(row, 'qc', '合格')">质检合格</el-button>
-            <el-button link type="danger" @click="advance(row, 'qc', '返工')">判返工</el-button>
-          </template>
+          <el-button
+            v-if="row.status === '待质检'"
+            link
+            type="warning"
+            @click="openQc(row)"
+          >质检交车</el-button>
           <el-button
             v-if="row.status === '待派工' || row.status === '施工中'"
             link
@@ -117,6 +130,43 @@
         <el-button type="primary" @click="submitAssign">派工</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="qcVisible" title="质检交车 · 逐项记过或不过" width="640px">
+      <el-alert
+        type="warning"
+        :closable="false"
+        show-icon
+        style="margin-bottom:12px"
+        title="制动、灯光、路试三项全过才能交车；只要有一项不过，这张单退回施工中，并记下不过项。"
+      />
+      <el-form label-width="80px">
+        <el-form-item label="工单">
+          <el-input :model-value="`${qcForm.orderNo} · ${qcForm.plate} · ${qcForm.model || ''}`" disabled />
+        </el-form-item>
+      </el-form>
+      <el-table :data="qcForm.items" border size="small">
+        <el-table-column prop="item" label="质检项" width="100">
+          <template #default="{ row }"><strong>{{ row.item }}</strong></template>
+        </el-table-column>
+        <el-table-column label="结论" width="200">
+          <template #default="{ row }">
+            <el-radio-group v-model="row.result">
+              <el-radio label="过">过</el-radio>
+              <el-radio label="不过">不过</el-radio>
+            </el-radio-group>
+          </template>
+        </el-table-column>
+        <el-table-column label="备注（不过请写明原因）">
+          <template #default="{ row }">
+            <el-input v-model="row.remark" size="small" placeholder="如：右前大灯不亮" />
+          </template>
+        </el-table-column>
+      </el-table>
+      <template #footer>
+        <el-button @click="qcVisible = false">取消</el-button>
+        <el-button type="primary" :loading="qcSubmitting" @click="submitQc">提交质检结论</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -141,6 +191,12 @@ const assignForm = reactive({
   id: null, orderNo: '', plate: '',
   bayId: null, technicianId: null, planDate: '', start: '09:00', end: '10:00'
 })
+
+// 固定三项，和后端 WorkOrderService.QC_ITEMS 一致；空项表（结论没选）不能提交
+const QC_ITEM_NAMES = ['制动', '灯光', '路试']
+const qcVisible = ref(false)
+const qcSubmitting = ref(false)
+const qcForm = reactive({ id: null, orderNo: '', plate: '', model: '', items: [] })
 
 const freeBays = computed(() => bays.value.filter((b) => b.status === '可用'))
 const onDutyTechs = computed(() => techs.value.filter((t) => t.status === '在岗'))
@@ -227,6 +283,67 @@ const advance = async (row, action, qcResult) => {
     load()
   } catch (e) {
     ElMessage.error(e.message)
+  }
+}
+
+const openQc = async (row) => {
+  Object.assign(qcForm, {
+    id: row.id, orderNo: row.orderNo, plate: row.plate, model: row.model || '',
+    items: QC_ITEM_NAMES.map((name) => ({ item: name, result: '', remark: '' }))
+  })
+  qcVisible.value = true
+  try {
+    // 拉这张单的项表（旧的待质检单缺行时后端会补齐），把已有结论 / 备注回填
+    const serverItems = await orderApi.qcItems(row.id)
+    for (const local of qcForm.items) {
+      const hit = serverItems.find((s) => s.item === local.item)
+      if (hit) {
+        local.result = hit.result || ''
+        local.remark = hit.remark || ''
+      }
+    }
+  } catch (e) {
+    ElMessage.error(e.message)
+    qcVisible.value = false
+  }
+}
+
+const submitQc = async () => {
+  const missing = qcForm.items.filter((i) => !i.result).map((i) => i.item)
+  if (missing.length > 0) {
+    ElMessage.warning(`项表还没记完：${missing.join('、')} 还没选过 / 不过，空项表不能交车`)
+    return
+  }
+  const failed = qcForm.items.filter((i) => i.result === '不过')
+  if (failed.length > 0) {
+    try {
+      await ElMessageBox.confirm(
+        `${failed.map((i) => i.item).join('、')} 判了不过，提交后这张单退回施工中，确定？`,
+        '有项不过，退回施工',
+        { type: 'warning', confirmButtonText: '退回施工', cancelButtonText: '再查查' }
+      )
+    } catch {
+      return
+    }
+  }
+  qcSubmitting.value = true
+  try {
+    // 项表和状态在后端一个事务里提交：网断在半路也不会出现已交车但项表没齐
+    const updated = await orderApi.submitQc(qcForm.id, qcForm.items.map((i) => ({
+      item: i.item, result: i.result, remark: i.remark || null
+    })))
+    qcVisible.value = false
+    if (updated.status === '已交车') {
+      ElMessage.success('三项全过，已交车')
+    } else {
+      ElMessage.warning(`已退回施工中：${updated.qcResult || ''}`)
+    }
+    load()
+  } catch (e) {
+    // 重复点交车 / 状态已变 / 项没齐，后端都会拦下，错误直接透出来
+    ElMessage.error(e.message)
+  } finally {
+    qcSubmitting.value = false
   }
 }
 

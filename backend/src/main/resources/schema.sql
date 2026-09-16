@@ -77,6 +77,19 @@ CREATE TABLE IF NOT EXISTS part_issue (
   PRIMARY KEY (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- 质检项表：每张工单固定 制动 / 灯光 / 路试 三行，result 没检为 NULL；全过才交车，有不过就退回施工
+CREATE TABLE IF NOT EXISTS qc_item (
+  id BIGINT NOT NULL AUTO_INCREMENT,
+  order_id BIGINT NOT NULL,
+  item VARCHAR(16) NOT NULL,
+  result VARCHAR(8) NULL,
+  remark VARCHAR(255) NULL,
+  created_at DATETIME NOT NULL,
+  updated_at DATETIME NOT NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_qc_order_item (order_id, item)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 INSERT IGNORE INTO bay (id, code, name, kind, status) VALUES
   (1, 'B-01', '一号举升工位', '举升', '可用'),
   (2, 'B-02', '二号举升工位', '举升', '可用'),
@@ -125,3 +138,12 @@ INSERT IGNORE INTO part_issue (id, order_id, part_id, qty, kind, operator, creat
   (3, 1, 5, 2, '领用', '张建军', NOW()),
   (4, 1, 5, 1, '退料', '张建军', NOW()),
   (5, 5, 3, 2, '领用', '赵小龙', NOW());
+
+-- WO-0002 正在待质检：项表已建好但还没检，结论都是 NULL，等质检员逐项记
+INSERT IGNORE INTO qc_item (id, order_id, item, result, remark, created_at, updated_at) VALUES
+  (1, 2, '制动', NULL, NULL, NOW(), NOW()),
+  (2, 2, '灯光', NULL, NULL, NOW(), NOW()),
+  (3, 2, '路试', NULL, NULL, NOW(), NOW()),
+  (4, 5, '制动', '过', NULL, NOW(), NOW()),
+  (5, 5, '灯光', '过', NULL, NOW(), NOW()),
+  (6, 5, '路试', '过', NULL, NOW(), NOW());

@@ -1,5 +1,7 @@
 package com.repair.workshop.controller;
 
+import com.repair.workshop.dto.QcSubmitRequest;
+import com.repair.workshop.entity.QcItem;
 import com.repair.workshop.entity.WorkOrder;
 import com.repair.workshop.service.WorkOrderService;
 import java.time.LocalDate;
@@ -41,5 +43,17 @@ public class WorkOrderController {
                              @RequestParam String action,
                              @RequestParam(required = false) String qcResult) {
         return service.advance(id, action, qcResult);
+    }
+
+    /** 这张车的质检项表（制动 / 灯光 / 路试） */
+    @GetMapping("/{id}/qc-items")
+    public List<QcItem> qcItems(@PathVariable Long id) {
+        return service.qcList(id);
+    }
+
+    /** 按项表质检：三项全过才交车，有一项不过退回施工，缺项不收 */
+    @PostMapping("/{id}/qc")
+    public WorkOrder submitQc(@PathVariable Long id, @RequestBody QcSubmitRequest request) {
+        return service.submitQc(id, request);
     }
 }

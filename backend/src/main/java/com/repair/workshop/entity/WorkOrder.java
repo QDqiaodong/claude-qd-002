@@ -59,6 +59,10 @@ public class WorkOrder {
     @Column(name = "qc_result", length = 16)
     public String qcResult;
 
+    /** 不是表字段：最近一次质检不过的项（如「灯光、路试」），退回施工时工单列表上要看得出来 */
+    @Transient
+    public String failedItems;
+
     @Column(name = "created_at", nullable = false)
     public LocalDateTime createdAt = LocalDateTime.now();
 
